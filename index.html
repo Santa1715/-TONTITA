@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 
 <head>
@@ -617,14 +617,19 @@
         for (let i = 0; i < 200; i++) {
             estrellas.push({ x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight, r: Math.random() * 1.5 + 0.2, fase: Math.random() * Math.PI * 2, vel: Math.random() * 0.02 + 0.005 });
         }
+        // ===== DETECCIÓN MOBILE / PERFORMANCE =====
+        const esMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 768;
+        const MAX_PARTICULAS = esMobile ? 300 : 600;
+        const NUM_ESTRELLAS = esMobile ? 80 : 160;
+        const PASO_CORAZON = esMobile ? 0.07 : 0.04; // menos puntos en móvil
 
         class EstrellaFugaz {
             constructor() { this.reset(); }
             reset() {
                 this.x = Math.random() * canvas.width;
                 this.y = Math.random() * canvas.height * 0.5;
-                this.len = Math.random() * 120 + 60;
-                this.speed = Math.random() * 8 + 4;
+                this.len = Math.random() * 100 + 50;
+                this.speed = Math.random() * 7 + 4;
                 this.angle = Math.PI / 4 + (Math.random() - 0.5) * 0.3;
                 this.vida = 0; this.maxVida = this.len / this.speed;
                 this.alpha = 0; this.delay = Math.random() * 300;
@@ -648,17 +653,23 @@
                 ctx.strokeStyle = g; ctx.lineWidth = 1.5; ctx.stroke();
                 ctx.beginPath(); ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
                 ctx.fillStyle = 'rgba(255,200,230,' + this.alpha + ')';
-                ctx.shadowBlur = 10; ctx.shadowColor = '#ff66cc'; ctx.fill(); ctx.shadowBlur = 0;
+                ctx.fill(); // sin shadowBlur (muy caro)
             }
         }
+        const numFugaces = esMobile ? 2 : 4;
         const fugaces = [];
-        for (let i = 0; i < 5; i++) fugaces.push(new EstrellaFugaz());
+        for (let i = 0; i < numFugaces; i++) fugaces.push(new EstrellaFugaz());
 
+        // Pre-calcular puntos del corazón una sola vez por tamaño
+        const PUNTOS_CORAZON_CACHE = {};
         function corazonPuntos(s) {
+            const key = Math.round(s * 10);
+            if (PUNTOS_CORAZON_CACHE[key]) return PUNTOS_CORAZON_CACHE[key];
             const p = [];
-            for (let t = 0; t < Math.PI * 2; t += 0.04) {
+            for (let t = 0; t < Math.PI * 2; t += PASO_CORAZON) {
                 p.push({ x: 16 * Math.pow(Math.sin(t), 3) * s, y: -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * s });
             }
+            PUNTOS_CORAZON_CACHE[key] = p;
             return p;
         }
 
@@ -704,36 +715,50 @@
                 this.color = color; this.alpha = 1; this.orb = orb;
                 this.g = orb ? 0.005 : 0.025;
                 this.f = orb ? 0.99 : 0.97;
-                this.sz = orb ? Math.random() * 3 + 2 : Math.random() * 3 + 1;
-                this.fade = orb ? 0.008 : 0.014;
+                this.sz = orb ? Math.random() * 3 + 2 : Math.random() * 2.5 + 1;
+                this.fade = orb ? 0.009 : 0.016;
             }
             update() { this.vx *= this.f; this.vy *= this.f; this.vy += this.g; this.x += this.vx; this.y += this.vy; this.alpha -= this.fade; }
             draw() {
-                ctx.save(); ctx.globalAlpha = Math.max(0, this.alpha);
+                const a = Math.max(0, this.alpha);
+                ctx.globalAlpha = a;
                 if (this.orb) {
-                    const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.sz * 2);
-                    g.addColorStop(0, 'white'); g.addColorStop(0.5, this.color); g.addColorStop(1, 'transparent');
-                    ctx.beginPath(); ctx.arc(this.x, this.y, this.sz * 2, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+                    // Simplificado: sin gradiente radial en móvil
+                    if (esMobile) {
+                        ctx.beginPath(); ctx.arc(this.x, this.y, this.sz * 1.5, 0, Math.PI * 2);
+                        ctx.fillStyle = this.color; ctx.fill();
+                    } else {
+                        const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.sz * 2);
+                        g.addColorStop(0, 'white'); g.addColorStop(0.5, this.color); g.addColorStop(1, 'transparent');
+                        ctx.beginPath(); ctx.arc(this.x, this.y, this.sz * 2, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+                    }
                 } else {
                     ctx.beginPath(); ctx.arc(this.x, this.y, this.sz, 0, Math.PI * 2);
-                    ctx.fillStyle = this.color; ctx.shadowBlur = 12; ctx.shadowColor = this.color; ctx.fill();
+                    ctx.fillStyle = this.color; ctx.fill();
                 }
-                ctx.restore();
+                ctx.globalAlpha = 1;
             }
         }
 
         const colores = ['#ff007f', '#ff66cc', '#b300b3', '#ffb3d9', '#ffffff', '#ff3399', '#ff99cc', '#ff4da6'];
 
         function explotar(cx, cy) {
+            // Limitar total de partículas para evitar lag
+            if (particulas.length > MAX_PARTICULAS - 100) {
+                particulas.splice(0, 120); // eliminar las más viejas
+            }
             const pts = corazonPuntos(11);
-            pts.forEach(p => {
+            const paso = esMobile ? 2 : 1; // saltarse puntos en móvil
+            pts.forEach((p, idx) => {
+                if (idx % paso !== 0) return;
                 const vx = p.x * 0.18, vy = p.y * 0.18;
                 const c = colores[Math.floor(Math.random() * colores.length)];
                 particulas.push(new Particle(cx, cy, vx, vy, c, false));
-                particulas.push(new Particle(cx, cy, vx * .7, vy * .7, c, true));
-                particulas.push(new Particle(cx, cy, vx * 1.3, vy * 1.3, '#fff', false));
+                if (!esMobile) particulas.push(new Particle(cx, cy, vx * .7, vy * .7, c, true));
+                particulas.push(new Particle(cx, cy, vx * 1.2, vy * 1.2, '#fff', false));
             });
-            for (let i = 0; i < 40; i++) {
+            const numChispas = esMobile ? 15 : 35;
+            for (let i = 0; i < numChispas; i++) {
                 const a = Math.random() * Math.PI * 2, sp = Math.random() * 5 + 1;
                 const c = colores[Math.floor(Math.random() * colores.length)];
                 particulas.push(new Particle(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp, c, false));
@@ -781,8 +806,8 @@
             hContainer.appendChild(el);
             setTimeout(() => el.remove(), (dur + 4) * 1000);
         }
-        for (let i = 0; i < 18; i++) setTimeout(addHeart, Math.random() * 5000);
-        setInterval(addHeart, 700);
+        for (let i = 0; i < 10; i++) setTimeout(addHeart, Math.random() * 5000);
+        setInterval(addHeart, esMobile ? 1400 : 900);
 
         // Click para PC
         window.addEventListener('click', (e) => {
@@ -806,33 +831,45 @@
         }, 4000);
 
         let bgPhase = 0;
+        let bgHeartFrame = 0;
         function drawBgHeart() {
-            bgPhase += 0.03;
+            bgHeartFrame++;
+            // Solo redibujar el corazón de fondo cada 2 frames (ahorra trabajo)
+            if (bgHeartFrame % 2 !== 0) return;
+            bgPhase += 0.06; // doble paso porque se llama cada 2 frames
             const s = Math.min(canvas.width, canvas.height) * 0.022 * (1 + Math.sin(bgPhase * 2) * 0.05);
             const pts = corazonPuntos(s), cx = canvas.width / 2, cy = canvas.height / 2;
             ctx.beginPath();
             pts.forEach((p, i) => { if (i === 0) ctx.moveTo(cx + p.x, cy + p.y); else ctx.lineTo(cx + p.x, cy + p.y); });
             ctx.closePath();
             ctx.strokeStyle = 'rgba(255,0,127,0.06)'; ctx.lineWidth = 1.5;
-            ctx.shadowBlur = 15; ctx.shadowColor = '#ff007f'; ctx.stroke(); ctx.shadowBlur = 0;
+            // Sin shadowBlur en el corazón de fondo (muy caro cada frame)
+            ctx.stroke();
         }
 
         function loop() {
             ctx.fillStyle = 'rgba(12,2,20,0.22)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
             drawBgHeart();
+
+            // Estrellas: dibujadas sin shadowBlur individual (renderizado por lotes)
             estrellas.forEach(s => {
                 s.fase += s.vel;
                 const op = (Math.sin(s.fase) + 1) / 2 * 0.8 + 0.1;
                 ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
                 ctx.fillStyle = 'rgba(255,220,240,' + op + ')';
-                if (s.r > 1) { ctx.shadowBlur = 4; ctx.shadowColor = '#ff99cc'; }
-                ctx.fill(); ctx.shadowBlur = 0;
+                ctx.fill();
             });
+
             fugaces.forEach(f => { f.update(); f.draw(); });
+
             cohetes = cohetes.filter(c => !c.dead);
             cohetes.forEach(c => { c.update(); c.draw(); });
+
+            // Cap de partículas para no acumular demasiadas
+            if (particulas.length > MAX_PARTICULAS) particulas.splice(0, particulas.length - MAX_PARTICULAS);
             particulas = particulas.filter(p => p.alpha > 0);
             particulas.forEach(p => { p.update(); p.draw(); });
+
             requestAnimationFrame(loop);
         }
         loop();
